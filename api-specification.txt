@@ -1,0 +1,1173 @@
+API-SPECIFICATION FOR GATEWAY <-> BACKEND NODES
+
+ÜBERSICHT
+=========
+Diese Spezifikation beschreibt die gesamte gRPC-Schnittstelle zwischen dem zentralen Gateway und den Backend-Nodes (Linux und Windows).
+
+Alle Backend-Komponenten müssen sich exakt an diese Spezifikation halten.
+
+Authentifizierung, Berechtigungen, Fehlercodes und Events sind Teil der offiziellen API.
+
+Allgemeine Prinzipien
+---------------------
+- Alle Methoden sind gRPC-RPCs.
+- Nachrichten werden als Protobuf-Modelle verstanden, dokumentiert in JSON-ähnlicher Form.
+- Streaming-Endpunkte sind explizit markiert.
+- Alle Requests müssen gültige Felder enthalten, sonst muss ein Fehler mit dem passenden Fehlercode zurückgegeben werden.
+- Authentifizierung erfolgt mit Backend-Token + TLS. Optional kann mTLS für zusätzliche Sicherheit erzwungen werden.
+
+AUTHENTIFIZIERUNGSVERFAHREN
+===========================
+Backend-Token + TLS
+-------------------
+- Backend-Nodes erhalten einen eindeutigen, vom Gateway ausgestellten Backend-Token.
+- Jeder Aufruf muss den Token in den gRPC-Metadaten enthalten:
+  - Header-Key: `authorization`
+  - Header-Wert: `Bearer <backend-token>`
+- TLS muss auf allen Verbindungen aktiviert sein.
+- Optional: mTLS, wenn Gateway und Backend sich gegenseitig authentifizieren müssen.
+
+Token-Validierung
+------------------
+- Der Backend-Token muss beim Gateway validiert werden.
+- Abgelaufene oder entziehene Tokens müssen mit Fehlercode `UNAUTHENTICATED` / `AUTH_1001` beantwortet werden.
+
+Berechtigungen
+===============
+- Jede Methode verlangt eine spezifische Berechtigung.
+- Berechtigungen werden als String angegeben, z.B. `server.start`.
+- Das Gateway prüft Berechtigungen vor der Ausführung.
+
+Fehlercodes
+===========
+Standardisierte Fehlercodes für Backend-Implementierung:
+
+Allgemein
+--------
+- `OK` (0): Erfolg.
+- `INVALID_ARGUMENT` (3) / `ARG_1000`: Ungültige Eingabe.
+- `NOT_FOUND` (5) / `RES_1001`: Ressource nicht gefunden.
+- `ALREADY_EXISTS` (6) / `RES_1002`: Ressource existiert bereits.
+- `PERMISSION_DENIED` (7) / `AUTH_1000`: Fehlende Berechtigung.
+- `UNAUTHENTICATED` (16) / `AUTH_1001`: Ungültiger oder fehlender Token.
+- `UNAVAILABLE` (14) / `SYS_1000`: Node nicht erreichbar oder temporär nicht verfügbar.
+- `INTERNAL` (13) / `SYS_1001`: Interner Fehler im Backend-Node.
+- `RESOURCE_EXHAUSTED` (8) / `SYS_1002`: Ressourcenlimit erreicht.
+- `FAILED_PRECONDITION` (9) / `SYS_1003`: Zustand nicht geeignet für Aktion.
+- `DEADLINE_EXCEEDED` (4) / `SYS_1004`: Zeitlimit überschritten.
+- `UNKNOWN` (2) / `SYS_1999`: Unbekannter Fehler.
+
+Spezielle Fehlercodes
+---------------------
+- `AUTH_1002`: Token-Format ungültig.
+- `AUTH_1003`: TLS-/mTLS-Validierung fehlgeschlagen.
+- `PERM_1000`: Fehlende Methode-Berechtigung.
+- `FILE_1000`: Dateioperation fehlgeschlagen.
+- `SERVER_1000`: Serverprozess-Operation fehlgeschlagen.
+- `EVENT_1000`: Event-Verarbeitung fehlgeschlagen.
+- `STREAM_1000`: Streaming-Verbindung fehlgeschlagen.
+
+Events
+======
+Event-Typen werden vom Backend aktiv an das Gateway gesendet und sind in der Protobuf-Schnittstelle definiert.
+
+Verfügbare Event-Typen
+----------------------
+- `BackendStatusUpdated`
+- `ServerStateChanged`
+- `ConsoleOutput`
+- `FileTransferProgress`
+- `HealthReport`
+- `SecurityAlert`
+- `NodeLogEntry`
+- `PermissionChanged`
+
+Jedes Event besitzt einen `eventType` und einen `payload`.
+
+SERVICE: NodeManagement
+=======================
+
+METHOD: RegisterNode
+--------------------
+NAME: RegisterNode
+BESCHREIBUNG:
+Der Backend-Node registriert sich beim Gateway. Diese Methode wird einmalig bei Start oder nach Neustart aufgerufen.
+REQUEST:
+{
+  "nodeId": "string",
+  "platform": "Linux|Windows",
+  "hostname": "string",
+  "ipAddress": "string",
+  "capabilities": ["string"],
+  "version": "string"
+}
+RESPONSE:
+{
+  "success": true,
+  "assignedNodeId": "string",
+  "expiresAt": "string (ISO 8601)",
+  "message": "string"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+node.register
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "platform": "Linux",
+  "hostname": "game-node-01",
+  "ipAddress": "10.0.0.100",
+  "capabilities": ["server.start", "file.upload", "console.stream"],
+  "version": "1.0.0"
+}
+RESPONSE:
+{
+  "success": true,
+  "assignedNodeId": "node-123",
+  "expiresAt": "2026-12-31T23:59:59Z",
+  "message": "Node registered successfully"
+}
+
+METHOD: UnregisterNode
+----------------------
+NAME: UnregisterNode
+BESCHREIBUNG:
+Der Backend-Node meldet sich beim Gateway ab, z. B. beim Herunterfahren.
+REQUEST:
+{
+  "nodeId": "string"
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "string"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+node.unregister
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123"
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "Node unregistered"
+}
+
+METHOD: Heartbeat
+-----------------
+NAME: Heartbeat
+BESCHREIBUNG:
+Regelmäßiges Lebenszeichen des Backend-Nodes. Das Gateway erhält Statusdaten und prüft Konnektivität.
+REQUEST:
+{
+  "nodeId": "string",
+  "timestamp": "string (ISO 8601)",
+  "cpuUsage": 0.0,
+  "memoryUsage": 0.0,
+  "diskUsage": 0.0,
+  "activeServers": ["string"]
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "string"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+node.heartbeat
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "timestamp": "2026-06-05T12:00:00Z",
+  "cpuUsage": 24.5,
+  "memoryUsage": 58.2,
+  "diskUsage": 42.1,
+  "activeServers": ["srv-001", "srv-002"]
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "Heartbeat received"
+}
+
+SERVICE: ServerManagement
+=========================
+
+METHOD: StartServer
+-------------------
+NAME: StartServer
+BESCHREIBUNG:
+Startet einen Serverprozess auf einem Backend-Node.
+REQUEST:
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "gameType": "string",
+  "config": { "string": "string" },
+  "startParameters": ["string"]
+}
+RESPONSE:
+{
+  "success": true,
+  "serverProcessId": "string",
+  "message": "Server started"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+server.start
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001",
+  "gameType": "minecraft",
+  "config": { "maxPlayers": "20", "map": "world" },
+  "startParameters": ["-Xmx2G", "-jar", "server.jar"]
+}
+RESPONSE:
+{
+  "success": true,
+  "serverProcessId": "proc-456",
+  "message": "Server started"
+}
+
+METHOD: StopServer
+------------------
+NAME: StopServer
+BESCHREIBUNG:
+Stoppt einen laufenden Serverprozess.
+REQUEST:
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "force": false
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "Server stopped"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+server.stop
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001",
+  "force": false
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "Server stopped"
+}
+
+METHOD: RestartServer
+---------------------
+NAME: RestartServer
+BESCHREIBUNG:
+Startet einen Serverprozess neu; besteht aus Stop + Start.
+REQUEST:
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "force": false
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "Server restarted"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+server.restart
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001",
+  "force": true
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "Server restarted"
+}
+
+METHOD: GetServerStatus
+-----------------------
+NAME: GetServerStatus
+BESCHREIBUNG:
+Liefert den aktuellen Zustand eines Servers.
+REQUEST:
+{
+  "nodeId": "string",
+  "serverId": "string"
+}
+RESPONSE:
+{
+  "serverId": "string",
+  "status": "starting|running|stopped|crashed|unknown",
+  "pid": "string",
+  "uptimeSeconds": 0,
+  "playerCount": 0,
+  "maxPlayers": 0,
+  "memoryUsageMb": 0,
+  "cpuUsagePercent": 0.0,
+  "message": "string"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+server.status
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001"
+}
+RESPONSE:
+{
+  "serverId": "srv-001",
+  "status": "running",
+  "pid": "12345",
+  "uptimeSeconds": 3600,
+  "playerCount": 5,
+  "maxPlayers": 20,
+  "memoryUsageMb": 1024,
+  "cpuUsagePercent": 12.3,
+  "message": "Server is healthy"
+}
+
+METHOD: ListServers
+-------------------
+NAME: ListServers
+BESCHREIBUNG:
+Liste aller Serverinstanzen auf einem Node.
+REQUEST:
+{
+  "nodeId": "string"
+}
+RESPONSE:
+{
+  "servers": [
+    {
+      "serverId": "string",
+      "status": "string",
+      "gameType": "string",
+      "pid": "string"
+    }
+  ]
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+server.list
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123"
+}
+RESPONSE:
+{
+  "servers": [
+    { "serverId": "srv-001", "status": "running", "gameType": "minecraft", "pid": "12345" },
+    { "serverId": "srv-002", "status": "stopped", "gameType": "csgo", "pid": "" }
+  ]
+}
+
+SERVICE: FileManagement
+=======================
+
+METHOD: UploadFile
+------------------
+NAME: UploadFile
+BESCHREIBUNG:
+Überträgt eine Datei vom Gateway zum Backend via Streaming.
+REQUEST:
+FileChunk Stream
+- `nodeId`: string
+- `serverId`: string
+- `path`: string
+- `chunkData`: bytes
+- `chunkIndex`: int
+- `isLastChunk`: bool
+RESPONSE:
+{
+  "success": true,
+  "bytesReceived": 0,
+  "message": "Upload completed"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+file.upload
+BEISPIEL:
+REQUEST STREAM:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001",
+  "path": "/games/minecraft/server.jar",
+  "chunkData": <binary>,
+  "chunkIndex": 1,
+  "isLastChunk": false
+}
+... final chunk ...
+RESPONSE:
+{
+  "success": true,
+  "bytesReceived": 2048576,
+  "message": "Upload completed"
+}
+
+METHOD: DownloadFile
+--------------------
+NAME: DownloadFile
+BESCHREIBUNG:
+Lädt eine Datei vom Backend zum Gateway via Streaming herunter.
+REQUEST:
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "path": "string"
+}
+RESPONSE:
+FileChunk Stream
+- `nodeId`: string
+- `serverId`: string
+- `path`: string
+- `chunkData`: bytes
+- `chunkIndex`: int
+- `isLastChunk`: bool
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+file.download
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001",
+  "path": "/games/minecraft/server.jar"
+}
+RESPONSE STREAM:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001",
+  "path": "/games/minecraft/server.jar",
+  "chunkData": <binary>,
+  "chunkIndex": 1,
+  "isLastChunk": false
+}
+... final chunk ...
+
+METHOD: ListFiles
+-----------------
+NAME: ListFiles
+BESCHREIBUNG:
+Listet Dateien und Ordner in einem Backend-Pfad auf.
+REQUEST:
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "path": "string"
+}
+RESPONSE:
+{
+  "entries": [
+    {
+      "name": "string",
+      "path": "string",
+      "type": "file|directory",
+      "sizeBytes": 0,
+      "modifiedAt": "string (ISO 8601)"
+    }
+  ]
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+file.list
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001",
+  "path": "/games/minecraft"
+}
+RESPONSE:
+{
+  "entries": [
+    { "name": "server.jar", "path": "/games/minecraft/server.jar", "type": "file", "sizeBytes": 20971520, "modifiedAt": "2026-06-05T11:00:00Z" },
+    { "name": "world", "path": "/games/minecraft/world", "type": "directory", "sizeBytes": 0, "modifiedAt": "2026-06-05T10:50:00Z" }
+  ]
+}
+
+METHOD: DeleteFile
+------------------
+NAME: DeleteFile
+BESCHREIBUNG:
+Löscht eine Datei oder ein Verzeichnis auf dem Backend-Node.
+REQUEST:
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "path": "string",
+  "recursive": false
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "File deleted"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+file.delete
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001",
+  "path": "/games/minecraft/old.zip",
+  "recursive": false
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "File deleted"
+}
+
+SERVICE: Console
+================
+
+METHOD: OpenConsoleStream
+-------------------------
+NAME: OpenConsoleStream
+BESCHREIBUNG:
+Öffnet einen bidirektionalen Konsolenstream zwischen Gateway und Backend-Serverprozess.
+REQUEST:
+ConsoleOpenRequest
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "sessionId": "string"
+}
+RESPONSE:
+Bidirectional Stream
+- `ConsoleRequest` vom Gateway an Backend:
+  - `sessionId`: string
+  - `command`: string
+  - `resizeWidth`: int (optional)
+  - `resizeHeight`: int (optional)
+- `ConsoleResponse` vom Backend an Gateway:
+  - `sessionId`: string
+  - `output`: string
+  - `isError`: bool
+  - `timestamp`: string
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+console.access
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001",
+  "sessionId": "sess-789"
+}
+STREAM:
+Gateway -> Backend:
+{
+  "sessionId": "sess-789",
+  "command": "status"
+}
+Backend -> Gateway:
+{
+  "sessionId": "sess-789",
+  "output": "Server is running\n",
+  "isError": false,
+  "timestamp": "2026-06-05T12:01:00Z"
+}
+
+METHOD: SendConsoleCommand
+--------------------------
+NAME: SendConsoleCommand
+BESCHREIBUNG:
+Sendet einen einzelnen Konsolenbefehl, wenn kein bidirektionaler Stream verwendet werden soll.
+REQUEST:
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "sessionId": "string",
+  "command": "string"
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "Command sent"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+console.access
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001",
+  "sessionId": "sess-789",
+  "command": "say Hello"
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "Command sent"
+}
+
+SERVICE: Monitoring
+===================
+
+METHOD: StreamServerLogs
+------------------------
+NAME: StreamServerLogs
+BESCHREIBUNG:
+Öffnet einen Server-Log-Stream vom Backend zum Gateway.
+REQUEST:
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "fromTimestamp": "string (ISO 8601, optional)"
+}
+RESPONSE:
+ServerLogEntry Stream
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "timestamp": "string",
+  "logLevel": "INFO|WARN|ERROR|DEBUG",
+  "message": "string"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+logs.stream
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001",
+  "fromTimestamp": "2026-06-05T11:50:00Z"
+}
+RESPONSE STREAM:
+{
+  "nodeId": "node-123",
+  "serverId": "srv-001",
+  "timestamp": "2026-06-05T12:00:00Z",
+  "logLevel": "INFO",
+  "message": "Server started"
+}
+
+METHOD: GetHealthReport
+-----------------------
+NAME: GetHealthReport
+BESCHREIBUNG:
+Fragt den aktuellen Gesundheitszustand des Backend-Nodes ab.
+REQUEST:
+{
+  "nodeId": "string"
+}
+RESPONSE:
+{
+  "nodeId": "string",
+  "serviceStatus": "healthy|degraded|unhealthy",
+  "cpuUsage": 0.0,
+  "memoryUsage": 0.0,
+  "diskUsage": 0.0,
+  "lastHeartbeat": "string (ISO 8601)",
+  "message": "string"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+monitoring.health
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123"
+}
+RESPONSE:
+{
+  "nodeId": "node-123",
+  "serviceStatus": "healthy",
+  "cpuUsage": 24.5,
+  "memoryUsage": 58.2,
+  "diskUsage": 42.1,
+  "lastHeartbeat": "2026-06-05T12:00:00Z",
+  "message": "Node healthy"
+}
+
+METHOD: StreamNodeEvents
+------------------------
+NAME: StreamNodeEvents
+BESCHREIBUNG:
+Öffnet einen Event-Stream, über den der Backend-Node asynchrone Ereignisse an das Gateway sendet.
+REQUEST:
+{
+  "nodeId": "string",
+  "eventTypes": ["string"]
+}
+RESPONSE:
+NodeEvent Stream
+{
+  "nodeId": "string",
+  "eventType": "BackendStatusUpdated|ServerStateChanged|ConsoleOutput|FileTransferProgress|HealthReport|SecurityAlert|NodeLogEntry|PermissionChanged",
+  "payload": { "string": "any" },
+  "timestamp": "string"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+event.stream
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "eventTypes": ["ServerStateChanged", "FileTransferProgress"]
+}
+RESPONSE STREAM:
+{
+  "nodeId": "node-123",
+  "eventType": "ServerStateChanged",
+  "payload": { "serverId": "srv-001", "status": "running" },
+  "timestamp": "2026-06-05T12:01:10Z"
+}
+
+SERVICE: Configuration
+======================
+
+METHOD: GetNodeConfiguration
+----------------------------
+NAME: GetNodeConfiguration
+BESCHREIBUNG:
+Liefert die aktuell vom Gateway konfigurierte Node-Einstellungen.
+REQUEST:
+{
+  "nodeId": "string"
+}
+RESPONSE:
+{
+  "nodeId": "string",
+  "settings": { "string": "string" },
+  "allowedFeatures": ["string"],
+  "message": "string"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+config.view
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123"
+}
+RESPONSE:
+{
+  "nodeId": "node-123",
+  "settings": { "maintenanceMode": "false", "maxConcurrentServers": "10" },
+  "allowedFeatures": ["file.upload", "server.start", "console.access"],
+  "message": "Configuration delivered"
+}
+
+METHOD: SetNodeConfiguration
+----------------------------
+NAME: SetNodeConfiguration
+BESCHREIBUNG:
+Aktualisiert Node-spezifische Konfigurationswerte, die das Gateway dem Backend mitteilt.
+REQUEST:
+{
+  "nodeId": "string",
+  "settings": { "string": "string" }
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "Configuration updated"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+config.edit
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "settings": { "maintenanceMode": "true" }
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "Configuration updated"
+}
+
+SERVICE: Security
+=================
+
+METHOD: ValidatePermissions
+---------------------------
+NAME: ValidatePermissions
+BESCHREIBUNG:
+Prüft, ob der Backend-Node für eine Aktion die notwendigen Berechtigungen besitzt.
+REQUEST:
+{
+  "nodeId": "string",
+  "permissions": ["string"]
+}
+RESPONSE:
+{
+  "nodeId": "string",
+  "results": [
+    {
+      "permission": "string",
+      "granted": true,
+      "reason": "string"
+    }
+  ]
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+security.validate
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "permissions": ["server.start", "file.upload"]
+}
+RESPONSE:
+{
+  "nodeId": "node-123",
+  "results": [
+    { "permission": "server.start", "granted": true, "reason": "allowed" },
+    { "permission": "file.upload", "granted": true, "reason": "allowed" }
+  ]
+}
+
+SERVICE: Diagnostics
+====================
+
+METHOD: RunCommand
+------------------
+NAME: RunCommand
+BESCHREIBUNG:
+Führt einen diagnostischen Befehl auf dem Backend-Node aus.
+REQUEST:
+{
+  "nodeId": "string",
+  "command": "string",
+  "arguments": ["string"],
+  "timeoutSeconds": 0
+}
+RESPONSE:
+{
+  "success": true,
+  "exitCode": 0,
+  "stdout": "string",
+  "stderr": "string",
+  "message": "Command executed"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+diagnostics.run
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "command": "powershell",
+  "arguments": ["-NoProfile", "Get-Process"],
+  "timeoutSeconds": 10
+}
+RESPONSE:
+{
+  "success": true,
+  "exitCode": 0,
+  "stdout": "ProcessName ...",
+  "stderr": "",
+  "message": "Command executed"
+}
+
+SERVICE: EventHandling
+======================
+
+METHOD: AcknowledgeEvent
+------------------------
+NAME: AcknowledgeEvent
+BESCHREIBUNG:
+Bestätigt den Empfang eines vom Gateway gesendeten Events oder einer Aktion.
+REQUEST:
+{
+  "nodeId": "string",
+  "eventId": "string",
+  "status": "received|processed|failed",
+  "message": "string"
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "Event acknowledged"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+event.acknowledge
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123",
+  "eventId": "evt-456",
+  "status": "processed",
+  "message": "Server started successfully"
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "Event acknowledged"
+}
+
+SERVICE: Admin
+===============
+
+METHOD: Ping
+------------
+NAME: Ping
+BESCHREIBUNG:
+Einfache Verfügbarkeitsprüfung des Nodes.
+REQUEST:
+{
+  "nodeId": "string"
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "pong",
+  "timestamp": "string"
+}
+AUTHENTIFIZIERUNG:
+Backend Token + TLS
+BERECHTIGUNG:
+admin.ping
+BEISPIEL:
+REQUEST:
+{
+  "nodeId": "node-123"
+}
+RESPONSE:
+{
+  "success": true,
+  "message": "pong",
+  "timestamp": "2026-06-05T12:02:00Z"
+}
+
+MODELLE UND DATENTYPEN
+=======================
+
+NodeRegistrationRequest
+-----------------------
+{
+  "nodeId": "string",
+  "platform": "Linux|Windows",
+  "hostname": "string",
+  "ipAddress": "string",
+  "capabilities": ["string"],
+  "version": "string"
+}
+
+FileChunk
+---------
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "path": "string",
+  "chunkData": bytes,
+  "chunkIndex": int,
+  "isLastChunk": bool
+}
+
+ConsoleOpenRequest
+------------------
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "sessionId": "string"
+}
+
+ConsoleRequest
+--------------
+{
+  "sessionId": "string",
+  "command": "string",
+  "resizeWidth": int (optional),
+  "resizeHeight": int (optional)
+}
+
+ConsoleResponse
+---------------
+{
+  "sessionId": "string",
+  "output": "string",
+  "isError": bool,
+  "timestamp": "string"
+}
+
+ServerLogEntry
+--------------
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "timestamp": "string",
+  "logLevel": "INFO|WARN|ERROR|DEBUG",
+  "message": "string"
+}
+
+NodeEvent
+---------
+{
+  "nodeId": "string",
+  "eventType": "string",
+  "payload": { "string": "any" },
+  "timestamp": "string"
+}
+
+PermissionValidationResult
+--------------------------
+{
+  "permission": "string",
+  "granted": bool,
+  "reason": "string"
+}
+
+EVENT-TYPEN
+============
+Backend-Node Event-Type-Beschreibungen:
+
+BackendStatusUpdated
+--------------------
+Payload:
+{
+  "nodeId": "string",
+  "status": "healthy|degraded|unhealthy",
+  "message": "string"
+}
+
+ServerStateChanged
+------------------
+Payload:
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "status": "starting|running|stopped|crashed",
+  "message": "string"
+}
+
+ConsoleOutput
+-------------
+Payload:
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "sessionId": "string",
+  "output": "string",
+  "isError": bool
+}
+
+FileTransferProgress
+--------------------
+Payload:
+{
+  "nodeId": "string",
+  "serverId": "string",
+  "path": "string",
+  "direction": "upload|download",
+  "bytesTransferred": 0,
+  "totalBytes": 0,
+  "progressPercent": 0.0
+}
+
+HealthReport
+------------
+Payload:
+{
+  "nodeId": "string",
+  "cpuUsage": 0.0,
+  "memoryUsage": 0.0,
+  "diskUsage": 0.0,
+  "serviceStatus": "healthy|degraded|unhealthy"
+}
+
+SecurityAlert
+-------------
+Payload:
+{
+  "nodeId": "string",
+  "severity": "low|medium|high|critical",
+  "title": "string",
+  "description": "string"
+}
+
+NodeLogEntry
+------------
+Payload:
+{
+  "nodeId": "string",
+  "message": "string",
+  "level": "INFO|WARN|ERROR|DEBUG",
+  "timestamp": "string"
+}
+
+PermissionChanged
+-----------------
+Payload:
+{
+  "nodeId": "string",
+  "permission": "string",
+  "granted": bool,
+  "reason": "string"
+}
+
+STREAMING-ENDPUNKTE
+===================
+- `UploadFile`: Client-streaming von Gateway zu Backend.
+- `DownloadFile`: Server-streaming von Backend zu Gateway.
+- `OpenConsoleStream`: Bidirektionales Streaming für Konsoleninteraktion.
+- `StreamServerLogs`: Server-streaming von Backend zu Gateway.
+- `StreamNodeEvents`: Server-streaming von Backend zu Gateway.
+
+IMPLEMENTIERUNGS-ANFORDERUNGEN
+=============================
+- Backend-Node muss TLS unterstützen.
+- Backend-Node muss Backend-Token verifizieren und fehlgeschlagene Authentifizierung korrekt melden.
+- Alle Methoden müssen klar benannte Response-Objekte liefern.
+- Events müssen konsistent gesendet werden und den angegebenen Payload-Typ verwenden.
+- Node-spezifische Aktionen müssen den `nodeId` als identifizierenden Kontext akzeptieren.
+- Methoden mit Streaming müssen den Zustand korrekt managen und `isLastChunk` verwenden.
+
+HINWEIS ZUR VERSIONIERUNG
+=========================
+- Diese Spezifikation beschreibt die aktuelle API-Version 1.
+- Erweiterungen müssen rückwärtskompatibel sein und neue Felder optional machen.
+- Änderungen an Service- oder Methodennamen sind breaking changes und dürfen nur nach Abstimmung erfolgen.
+
+ENDE DER API-SPEZIFIKATION

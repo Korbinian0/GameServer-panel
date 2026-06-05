@@ -1,0 +1,13 @@
+FROM golang:1.23-alpine AS builder
+WORKDIR /workspace
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend ./
+RUN go build -o /usr/local/bin/gateway ./cmd/gateway
+
+FROM alpine:3.18
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /usr/local/bin/gateway /usr/local/bin/gateway
+WORKDIR /app
+EXPOSE 8080 50051
+ENTRYPOINT ["/usr/local/bin/gateway"]

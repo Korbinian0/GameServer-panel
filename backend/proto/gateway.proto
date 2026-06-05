@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package gateway;
+
+option go_package = "github.com/Korbinian0/GameServer-panel/backend/proto;gatewaypb";
+
+message NodeRegistrationRequest {
+  string nodeId = 1;
+  string platform = 2;
+  string hostname = 3;
+  string ipAddress = 4;
+  repeated string capabilities = 5;
+  string version = 6;
+}
+
+message RegisterNodeResponse {
+  bool success = 1;
+  string assignedNodeId = 2;
+  string expiresAt = 3;
+  string message = 4;
+}
+
+message HeartbeatRequest {
+  string nodeId = 1;
+  string timestamp = 2;
+  double cpuUsage = 3;
+  double memoryUsage = 4;
+  double diskUsage = 5;
+  repeated string activeServers = 6;
+}
+
+message HeartbeatResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message FileChunk {
+  string nodeId = 1;
+  string serverId = 2;
+  string path = 3;
+  bytes chunkData = 4;
+  int32 chunkIndex = 5;
+  bool isLastChunk = 6;
+}
+
+message UploadResult {
+  bool success = 1;
+  int64 bytesReceived = 2;
+  string message = 3;
+}
+
+message DownloadRequest {
+  string nodeId = 1;
+  string serverId = 2;
+  string path = 3;
+}
+
+message ServerStatusRequest {
+  string nodeId = 1;
+  string serverId = 2;
+}
+
+message ServerStatusResponse {
+  string serverId = 1;
+  string status = 2;
+  string pid = 3;
+  int64 uptimeSeconds = 4;
+  int32 playerCount = 5;
+  int32 maxPlayers = 6;
+  int32 memoryUsageMb = 7;
+  double cpuUsagePercent = 8;
+  string message = 9;
+}
+
+message ConsoleOpenRequest {
+  string nodeId = 1;
+  string serverId = 2;
+  string sessionId = 3;
+}
+
+message ConsoleRequest {
+  string sessionId = 1;
+  string command = 2;
+  int32 resizeWidth = 3;
+  int32 resizeHeight = 4;
+}
+
+message ConsoleResponse {
+  string sessionId = 1;
+  string output = 2;
+  bool isError = 3;
+  string timestamp = 4;
+}
+
+service NodeManagement {
+  rpc RegisterNode(NodeRegistrationRequest) returns (RegisterNodeResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+service FileManagement {
+  rpc UploadFile(stream FileChunk) returns (UploadResult);
+  rpc DownloadFile(DownloadRequest) returns (stream FileChunk);
+}
+
+service Console {
+  rpc OpenConsoleStream(stream ConsoleRequest) returns (stream ConsoleResponse);
+}
