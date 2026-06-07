@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Backups</title>
+    <title>Benutzerverwaltung</title>
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body class="panel-sidebar">
@@ -14,8 +14,8 @@
             <li onclick="window.location.href='server.html'">Server</li>
             <li onclick="window.location.href='server-shell.html'">Server-Shell</li>
             <li onclick="window.location.href='host-shell.html'">Host-Shell</li>
-            <li class="active">Backups</li>
-            <li onclick="window.location.href='user.html'">Benutzerverwaltung</li>
+            <li onclick="window.location.href='backup.html'">Backups</li>
+            <li class="active">Benutzerverwaltung</li>
             <li onclick="window.location.href='hosts.html'">Hosts</li>
             <li onclick="window.location.href='settings.html'">Einstellungen</li>
         </ul>
@@ -26,25 +26,27 @@
             <input type="text" placeholder="Suchen..." disabled>
             <div class="user">Admin</div>
         </div>
-
+    
         <div class="content">
             <div class="chart">
-                <h2>Backups</h2>
-                <p>Hier kannst du deine Backups verwalten. Erstelle neue Backups, lade alte Backups herunter oder lösche nicht mehr benötigte Backups.</p>
+                <h2>Benutzerverwaltung</h2>
+                <p>Hier kannst du Benutzer hinzufügen, bearbeiten oder entfernen. Verwalte die Zugriffsrechte und Rollen deiner Benutzer.</p>
                 <br>
-                <button id="create-backup-button">Neues Backup erstellen</button>
+                <p>Benutzername</p>
+                <input type="text" id="username" placeholder="Benutzername eingeben...">
+                <p>Passwort</p>
+                <input type="password" id="password" placeholder="Passwort eingeben...">
+                <button id="add-user-button">Neuen Benutzer hinzufügen</button>
+
                 <br><br>
-                <table class="backup-table">
+                <table class="user-table">
                     <thead>
                         <tr>
-                            <th>Name</th>
-                            <th>Datum</th>
-                            <th>Größe</th>
-                            <th>Aktionen</th>
+                            <th>Benutzername</th>
                         </tr>
                     </thead>
-                    <tbody id="backup-table-body">
-                        <!-- Backup-Einträge werden hier dynamisch eingefügt -->
+                    <tbody id="user-table-body">
+                        <!-- Benutzer-Einträge werden hier dynamisch eingefügt -->
                     </tbody>
                 </table>
             </div>
