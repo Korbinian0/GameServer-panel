@@ -113,6 +113,10 @@ body.panel-sidebar {
     background: #374151;
 }
 
+.sidebar li.active {
+    background: linear-gradient(135deg, #fcb825, #6a11cb);
+}
+
 .main {
     flex: 1;
     display: flex;
